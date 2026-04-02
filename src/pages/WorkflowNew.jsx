@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useStore from '../store/useStore'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -6,10 +6,11 @@ import {
   ArrowLeft, Sparkles, Zap, ArrowRight, Palette, Film, 
   Wand2, Check, ChevronRight, Star, Flame,
   Heart, MessageCircle, Eye, Play, Clock, Sparkle,
-  Image as ImageIcon, Wand, Sparkle as SparkleIcon, Camera, Music
+  Image as ImageIcon, Wand, Sparkle as SparkleIcon, Camera, Music,
+  FileText, Layers, DollarSign, AlertCircle, Loader
 } from 'lucide-react'
 
-const API_URL = 'http://localhost:3001/api'
+const API_URL = '/api'
 
 const styles = [
   { id: '2d_jp', name: '日系动漫', icon: '🎨', desc: '清新唯美的日漫画风', gradient: 'from-pink-500 to-rose-500', glow: 'shadow-pink-500/30' },
@@ -31,6 +32,71 @@ const steps = [
   { num: 3, label: '开始创作', icon: Sparkles, color: 'cyan' },
 ]
 
+// 解析剧本为分镜
+function parseScript(script) {
+  if (!script || script.length < 10) return null
+  
+  const shots = []
+  // 匹配各种格式的剧本片段
+  const patterns = [
+    /【场景】([^\n【】]+)/g,
+    /【角色】([^\n【】]+)/g,
+    /【台词】([^\n【】]+)/g,
+    /【动作】([^\n【】]+)/g,
+  ]
+  
+  // 简单分镜逻辑：按段落分割
+  const paragraphs = script.split(/\n\n+/).filter(p => p.trim())
+  let currentShot = null
+  
+  paragraphs.forEach((para, i) => {
+    const trimmed = para.trim()
+    if (!trimmed) return
+    
+    // 检测是否是场景描述
+    const sceneMatch = trimmed.match(/【场景】(.+)/)
+    const charMatch = trimmed.match(/【角色】(.+)/)
+    const dialogueMatch = trimmed.match(/【台词】(.+)/)
+    const actionMatch = trimmed.match(/【动作】(.+)/)
+    
+    if (sceneMatch || i === 0) {
+      if (currentShot) shots.push(currentShot)
+      currentShot = {
+        id: shots.length + 1,
+        scene: sceneMatch ? sceneMatch[1] : (trimmed.substring(0, 30) + '...'),
+        character: charMatch ? charMatch[1] : '',
+        dialogue: dialogueMatch ? dialogueMatch[1] : '',
+        action: actionMatch ? actionMatch[1] : ''
+      }
+    } else {
+      if (currentShot) {
+        if (charMatch && !currentShot.character) currentShot.character = charMatch[1]
+        if (dialogueMatch && !currentShot.dialogue) currentShot.dialogue = dialogueMatch[1]
+        if (actionMatch && !currentShot.action) currentShot.action = actionMatch[1]
+      }
+    }
+  })
+  
+  if (currentShot) shots.push(currentShot)
+  
+  // 如果没有检测到分镜，按字数平均分配
+  if (shots.length === 0) {
+    const avgLength = 100
+    const count = Math.max(1, Math.ceil(script.length / avgLength))
+    for (let i = 0; i < count; i++) {
+      shots.push({
+        id: i + 1,
+        scene: `场景 ${i + 1}`,
+        character: '',
+        dialogue: script.substring(i * avgLength, (i + 1) * avgLength).trim(),
+        action: ''
+      })
+    }
+  }
+  
+  return shots
+}
+
 export default function WorkflowNew() {
   const navigate = useNavigate()
   const { addProject } = useStore()
@@ -38,14 +104,50 @@ export default function WorkflowNew() {
   const [script, setScript] = useState('')
   const [style, setStyle] = useState('2d_jp')
   const [loading, setLoading] = useState(false)
+  const [parsing, setParsing] = useState(false)
   const [step, setStep] = useState(1)
   const userPoints = 999999
 
   const selectedStyle = styles.find(s => s.id === style)
 
+  // 解析剧本
+  const parsedShots = useMemo(() => parseScript(script), [script])
+  
+  // 计算配置信息
+  const config = useMemo(() => {
+    if (!parsedShots || parsedShots.length === 0) {
+      return null
+    }
+    
+    const shotCount = parsedShots.length
+    const estimatedDuration = Math.ceil(shotCount * 15) // 每镜约15秒
+    const estimatedTokens = Math.ceil(script.length * 1.5) // 按字数估算token
+    const estimatedPoints = shotCount * 10 // 每镜10积分
+    
+    return {
+      duration: estimatedDuration,
+      durationText: `${Math.floor(estimatedDuration / 60)}分${estimatedDuration % 60}秒`,
+      tokens: estimatedTokens,
+      shotCount,
+      points: estimatedPoints
+    }
+  }, [parsedShots, script])
+
+  // 自动解析剧本
+  useEffect(() => {
+    if (script.length > 20) {
+      setParsing(true)
+      const timer = setTimeout(() => {
+        setParsing(false)
+      }, 500)
+      return () => clearTimeout(timer)
+    }
+  }, [script])
+
   const handleCreate = async () => {
     if (!title.trim()) { alert('请输入项目标题'); return }
     if (!script.trim()) { alert('请输入剧本内容'); return }
+    if (!config) { alert('剧本内容不足，请输入更多内容'); return }
     
     setLoading(true)
     const token = localStorage.getItem('token') || 'demo-token'
@@ -54,7 +156,7 @@ export default function WorkflowNew() {
       const res = await fetch(`${API_URL}/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ title, script, style })
+        body: JSON.stringify({ title, script, style, shots: parsedShots, config })
       })
       const data = await res.json()
       if (data.project) {
@@ -62,12 +164,12 @@ export default function WorkflowNew() {
         navigate(`/workflow/${data.project.id}`)
       } else {
         const demoId = 'demo_' + Date.now()
-        addProject({ id: demoId, title, script, style, status: 'processing', createdAt: new Date().toISOString() })
+        addProject({ id: demoId, title, script, style, status: 'processing', createdAt: new Date().toISOString(), shots: parsedShots })
         navigate(`/workflow/${demoId}`)
       }
     } catch (err) {
       const demoId = 'demo_' + Date.now()
-      addProject({ id: demoId, title, script, style, status: 'processing', createdAt: new Date().toISOString() })
+      addProject({ id: demoId, title, script, style, status: 'processing', createdAt: new Date().toISOString(), shots: parsedShots })
       navigate(`/workflow/${demoId}`)
     }
     setLoading(false)
@@ -99,17 +201,20 @@ export default function WorkflowNew() {
                 <ArrowLeft className="w-5 h-5" />
                 <span>返回控制台</span>
               </button>
+
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-gradient-to-r from-emerald-500/15 to-cyan-500/15 border border-emerald-500/20">
                   <Zap className="w-5 h-5 text-emerald-400" />
                   <span className="text-emerald-400 font-bold text-lg">{userPoints.toLocaleString()}</span>
                   <span className="text-zinc-500 text-sm">积分</span>
                 </div>
+
               </div>
             </div>
           </nav>
         </div>
       </header>
+
 
       <main className="relative z-10 pt-32 pb-16 px-4">
         <div className="max-w-5xl mx-auto">
@@ -131,25 +236,35 @@ export default function WorkflowNew() {
                   </h1>
                   <p className="text-xl text-zinc-400">从剧本到视频，AI 帮你一键搞定</p>
                 </div>
+
                 <div className="flex items-center gap-8">
                   <div className="text-center">
                     <SparkleIcon className="w-10 h-10 mx-auto mb-2 text-emerald-400" />
                     <p className="text-sm text-zinc-400">智能分析</p>
+
                   </div>
+
                   <div className="w-px h-12 bg-white/10" />
                   <div className="text-center">
                     <Heart className="w-10 h-10 mx-auto mb-2 text-violet-400" />
                     <p className="text-sm text-zinc-400">角色一致</p>
+
                   </div>
+
                   <div className="w-px h-12 bg-white/10" />
                   <div className="text-center">
                     <Camera className="w-10 h-10 mx-auto mb-2 text-cyan-400" />
                     <p className="text-sm text-zinc-400">自动配音</p>
+
                   </div>
+
                 </div>
+
               </div>
+
             </div>
           </motion.div>
+
 
           {/* 步骤指示器 */}
           <motion.div 
@@ -157,6 +272,7 @@ export default function WorkflowNew() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
             className="flex items-center justify-center gap-4 mb-16"
+
           >
             {steps.map((s, i) => (
               <div key={s.num} className="flex items-center">
@@ -169,7 +285,7 @@ export default function WorkflowNew() {
                     ${step === s.num 
                       ? s.color === 'emerald' ? 'bg-gradient-to-r from-emerald-400 to-cyan-400 text-black shadow-xl shadow-emerald-500/30' :
                         s.color === 'violet' ? 'bg-gradient-to-r from-violet-500 to-purple-500 text-white shadow-xl shadow-violet-500/30' :
-                        'bg-gradient-to-r from-cyan-400 to-blue-400 text-black shadow-xl shadow-cyan-500/30'
+'bg-gradient-to-r from-cyan-400 to-blue-400 text-black shadow-xl shadow-cyan-500/30'
                       : step > s.num 
                       ? 'bg-white/5 border border-emerald-500/30 text-emerald-400 cursor-pointer hover:bg-emerald-500/10'
                       : 'bg-white/5 border border-white/10 text-zinc-500 cursor-not-allowed'}
@@ -182,12 +298,16 @@ export default function WorkflowNew() {
                   )}
                   <span className="text-lg">{s.label}</span>
                 </motion.button>
+
                 {i < 2 && (
                   <ChevronRight className={`w-6 h-6 mx-4 ${step > s.num ? 'text-emerald-400' : 'text-zinc-600'}`} />
                 )}
+
               </div>
+
             ))}
           </motion.div>
+
 
           <AnimatePresence mode="wait">
             {step === 1 && (
@@ -197,6 +317,7 @@ export default function WorkflowNew() {
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 20 }}
                 className="space-y-12"
+
               >
                 {/* 风格选择 */}
                 <div>
@@ -233,12 +354,16 @@ export default function WorkflowNew() {
                         <div className={`w-20 h-20 mx-auto mb-5 rounded-2xl bg-gradient-to-br ${s.gradient} flex items-center justify-center text-4xl shadow-lg`}>
                           {s.icon}
                         </div>
+
                         <p className="font-bold text-lg text-white mb-2">{s.name}</p>
                         <p className="text-sm text-zinc-500">{s.desc}</p>
+
                       </motion.button>
+
                     ))}
                   </div>
                 </div>
+
 
                 {/* 热门模板 */}
                 <div>
@@ -257,11 +382,13 @@ export default function WorkflowNew() {
                         whileTap={{ scale: 0.98 }}
                         onClick={() => selectTemplate(t)}
                         className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 hover:border-orange-500/30 transition-all"
+
                       >
                         <div className="aspect-[4/3] overflow-hidden">
                           <img src={t.cover} alt={t.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
                           <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent" />
                         </div>
+
                         <div className="absolute bottom-0 left-0 right-0 p-5">
                           {t.badge && (
                             <div className="absolute top-3 right-3 px-3 py-1 bg-gradient-to-r from-orange-500 to-red-500 text-white text-xs font-bold rounded-full shadow-lg">
@@ -274,22 +401,29 @@ export default function WorkflowNew() {
                             <span className="flex items-center gap-1"><Eye className="w-3.5 h-3.5" /> {t.views}</span>
                             <span className="flex items-center gap-1"><Heart className="w-3.5 h-3.5" /> {t.likes}</span>
                           </div>
+
                         </div>
+
                       </motion.button>
+
                     ))}
                   </div>
                 </div>
+
 
                 <motion.button 
                   onClick={() => setStep(2)} 
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   className="w-full py-6 text-xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 text-black rounded-2xl shadow-xl shadow-emerald-500/20 hover:shadow-2xl hover:shadow-emerald-500/30 transition-all"
+
                 >
                   下一歩 <ArrowRight className="w-6 h-6 inline ml-2" />
                 </motion.button>
+
               </motion.div>
             )}
+
 
             {step === 2 && (
               <motion.div
@@ -298,6 +432,7 @@ export default function WorkflowNew() {
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
                 className="space-y-8"
+
               >
                 {/* 已选风格提示 */}
                 <div className="flex items-center justify-between p-6 rounded-3xl bg-gradient-to-r from-white/5 to-white/[0.02] border border-white/10">
@@ -305,15 +440,20 @@ export default function WorkflowNew() {
                     <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${selectedStyle?.gradient} flex items-center justify-center text-3xl shadow-lg`}>
                       {selectedStyle?.icon}
                     </div>
+
                     <div>
                       <p className="font-bold text-xl text-white">{selectedStyle?.name}</p>
                       <p className="text-zinc-400">{selectedStyle?.desc}</p>
                     </div>
+
                   </div>
+
                   <button onClick={() => setStep(1)} className="text-sm text-emerald-400 hover:underline font-medium">
                     更改风格
                   </button>
+
                 </div>
+
 
                 {/* 项目标题 */}
                 <div>
@@ -325,9 +465,12 @@ export default function WorkflowNew() {
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="例如：《星际穿越》第一集"
+
                     className="w-full px-6 py-5 text-lg bg-white/5 border border-white/10 rounded-2xl text-white placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50 focus:bg-emerald-500/5 transition-all"
+
                   />
                 </div>
+
 
                 {/* 剧本内容 */}
                 <div>
@@ -346,10 +489,12 @@ export default function WorkflowNew() {
 【台词】林悦：今天天气真好呀...
 
 也可以直接写叙事内容，AI 会自动分析分镜。`}
-rows={14}
+rows={10}
                     className="w-full px-6 py-5 bg-white/5 border border-white/10 rounded-2xl text-white placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50 focus:bg-emerald-500/5 transition-all resize-none leading-relaxed"
+
                   />
                 </div>
+
 
                 {/* 字数统计 */}
                 <div className="flex items-center justify-between text-base">
@@ -359,6 +504,131 @@ rows={14}
                   </span>
                 </div>
 
+
+                {/* 剧情配置区块 */}
+                <motion.div 
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-8 rounded-3xl bg-gradient-to-br from-violet-500/10 to-cyan-500/5 border border-white/10"
+                >
+                  <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-3">
+                    <FileText className="w-6 h-6 text-violet-400" />
+                    剧情配置
+                  </h3>
+                  
+                  {/* 配置指标 */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                    {/* 生成时长 */}
+                    <div className="p-4 rounded-2xl bg-white/5 border border-white/10">
+                      <div className="flex items-center gap-2 text-zinc-500 mb-2">
+                        <Clock className="w-4 h-4" />
+                        <span className="text-sm">生成时长</span>
+                      </div>
+                      <p className="text-2xl font-bold text-white">
+                        {parsing ? (
+                          <Loader className="w-5 h-5 animate-spin text-violet-400" />
+                        ) : config ? (
+                          config.durationText
+                        ) : (
+                          '--'
+                        )}
+                      </p>
+                    </div>
+                    
+                    {/* 预计消耗tokens */}
+                    <div className="p-4 rounded-2xl bg-white/5 border border-white/10">
+                      <div className="flex items-center gap-2 text-zinc-500 mb-2">
+                        <Layers className="w-4 h-4" />
+                        <span className="text-sm">预计消耗tokens</span>
+                      </div>
+                      <p className="text-2xl font-bold text-white">
+                        {parsing ? (
+                          <Loader className="w-5 h-5 animate-spin text-cyan-400" />
+                        ) : config ? (
+                          config.tokens.toLocaleString()
+                        ) : (
+                          '--'
+                        )}
+                      </p>
+                    </div>
+                    
+                    {/* 分镜数量 */}
+                    <div className="p-4 rounded-2xl bg-white/5 border border-white/10">
+                      <div className="flex items-center gap-2 text-zinc-500 mb-2">
+                        <ImageIcon className="w-4 h-4" />
+                        <span className="text-sm">分镜数量</span>
+                      </div>
+                      <p className="text-2xl font-bold text-white">
+                        {parsing ? (
+                          <Loader className="w-5 h-5 animate-spin text-emerald-400" />
+                        ) : config ? (
+                          config.shotCount
+                        ) : (
+                          '--'
+                        )}
+                      </p>
+                    </div>
+                    
+                    {/* 预计积分 */}
+                    <div className="p-4 rounded-2xl bg-white/5 border border-white/10">
+                      <div className="flex items-center gap-2 text-zinc-500 mb-2">
+                        <DollarSign className="w-4 h-4" />
+                        <span className="text-sm">预计积分</span>
+                      </div>
+                      <p className="text-2xl font-bold text-amber-400">
+                        {parsing ? (
+                          <Loader className="w-5 h-5 animate-spin text-amber-400" />
+                        ) : config ? (
+                          config.points
+                        ) : (
+                          '--'
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {/* 脚本预览 */}
+                  <div>
+                    <h4 className="text-sm font-medium text-zinc-400 mb-3 flex items-center gap-2">
+                      <SparkleIcon className="w-4 h-4" />
+                      脚本预览
+                    </h4>
+                    <div className="p-4 rounded-2xl bg-black/40 border border-white/5 max-h-60 overflow-y-auto">
+                      {parsing ? (
+                        <div className="flex items-center justify-center py-8 text-zinc-500">
+                          <Loader className="w-5 h-5 animate-spin mr-2" />
+                          解析剧本中...
+                        </div>
+                      ) : parsedShots && parsedShots.length > 0 ? (
+                        <div className="space-y-3">
+                          {parsedShots.map((shot, i) => (
+                            <div key={shot.id || i} className="flex items-start gap-3 p-3 rounded-xl bg-white/5">
+                              <span className="w-6 h-6 rounded-lg bg-violet-500/20 text-violet-400 text-xs font-bold flex items-center justify-center shrink-0">
+                                {i + 1}
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm text-zinc-300 line-clamp-1">{shot.scene}</p>
+                                {shot.character && (
+                                  <p className="text-xs text-zinc-500 mt-1">{shot.character}</p>
+                                )}
+                                {shot.dialogue && (
+                                  <p className="text-sm text-white/80 mt-1 italic">"{shot.dialogue.substring(0, 50)}{shot.dialogue.length > 50 ? '...' : ''}"</p>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center py-8 text-zinc-600">
+                          <AlertCircle className="w-5 h-5 mr-2" />
+                          请输入剧本内容以生成预览
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </motion.div>
+
+
                 {/* 操作按钮 */}
                 <div className="flex gap-5 pt-4">
                   <motion.button 
@@ -366,34 +636,44 @@ rows={14}
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     className="flex-1 py-5 text-lg font-semibold bg-white/5 border border-white/10 rounded-2xl text-white hover:bg-white/10 transition-all"
+
                   >
                     上一歩
                   </motion.button>
+
                   <motion.button 
                     onClick={handleCreate} 
-                    disabled={loading || !title.trim() || !script.trim()}
-                    whileHover={{ scale: !loading && title.trim() && script.trim() ? 1.02 : 1 }}
-                    whileTap={{ scale: !loading && title.trim() && script.trim() ? 0.98 : 1 }}
-                    className="flex-1 flex items-center justify-center gap-3 py-5 text-lg font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 text-black rounded-2xl shadow-xl shadow-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 transition-all"
+                    disabled={loading || !title.trim() || !script.trim() || !config}
+                    whileHover={{ scale: !loading && title.trim() && script.trim() && config ? 1.02 : 1 }}
+                    whileTap={{ scale: !loading && title.trim() && script.trim() && config ? 0.98 : 1 }}
+                    className="flex-1 flex items-center justify-center gap-3 py-5 text-lg font-bold bg-gradient-to-r from-violet-500 to-cyan-500 text-white rounded-2xl shadow-xl shadow-violet-500/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 transition-all"
+
                   >
                     {loading ? (
                       <>
-                        <div className="w-6 h-6 border-2 border-black/20 border-t-black rounded-full animate-spin" />
-                        创作中..
+                        <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                        创建中..
                       </>
                     ) : (
                       <>
                         <Wand2 className="w-6 h-6" />
-                        开始创作
+                        生成漫剧
                       </>
                     )}
                   </motion.button>
+
                 </div>
+
               </motion.div>
+
             )}
           </AnimatePresence>
+
         </div>
+
       </main>
+
     </div>
+
   )
 }
