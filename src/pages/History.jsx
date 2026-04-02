@@ -8,7 +8,7 @@ import {
   ChevronRight, Calendar, Filter, Search, MoreVertical
 } from 'lucide-react'
 
-const API_URL = 'http://localhost:3001/api'
+const API_URL = '/api'
 
 // 历史记录类型
 const HISTORY_TYPES = {

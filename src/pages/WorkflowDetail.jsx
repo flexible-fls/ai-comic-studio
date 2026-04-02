@@ -13,7 +13,7 @@ import {
   Mic, Speaker, Laugh
 } from 'lucide-react'
 
-const API_URL = 'http://localhost:3001/api'
+const API_URL = '/api'
 
 // 生成步骤定义
 const GENERATION_STEPS = [
