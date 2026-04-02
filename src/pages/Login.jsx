@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Sparkles, ArrowRight, Eye, EyeOff, User, Mail, Lock } from 'lucide-react'
+import { Sparkles, ArrowRight, Eye, EyeOff, User, Mail, Lock, Play } from 'lucide-react'
 import useStore from '../store/useStore'
 
 const API_URL = '/api'
@@ -20,6 +20,7 @@ export default function Login() {
     e.preventDefault()
     setError('')
     setLoading(true)
+
     try {
       const endpoint = isLogin ? '/auth/login' : '/auth/register'
       const body = isLogin ? { email, password } : { email, password, nickname: name }
@@ -34,8 +35,25 @@ export default function Login() {
       localStorage.setItem('user', JSON.stringify(data.user))
       setUser(data.user)
       navigate('/dashboard')
-    } catch (err) { setError(err.message) }
+    } catch (err) {
+      setError(err.message)
+    }
     finally { setLoading(false) }
+  }
+
+  // 演示模式登录
+  const handleDemoLogin = () => {
+    const demoUser = {
+      id: 'demo_user',
+      email: 'demo@ai-comic.studio',
+      nickname: '演示用户',
+      points: 99999,
+      membership: 'pro'
+    }
+    localStorage.setItem('token', 'demo_token')
+    localStorage.setItem('user', JSON.stringify(demoUser))
+    setUser(demoUser)
+    navigate('/dashboard')
   }
 
   return (
@@ -48,6 +66,46 @@ export default function Login() {
           </Link>
           <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#fff', marginTop: '16px' }}>FULUSHOU</h1>
           <p style={{ fontSize: '14px', color: '#71717a', marginTop: '4px' }}>AI 漫剧创作平台</p>
+        </div>
+
+        {/* 演示模式提示 */}
+        <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', marginBottom: '16px' }}>
+          <p style={{ fontSize: '12px', color: '#10b981', textAlign: 'center' }}>
+            后端服务暂不可用，请使用演示模式体验
+          </p>
+        </div>
+
+        {/* 演示登录按钮 */}
+        <button 
+          onClick={handleDemoLogin}
+          style={{ 
+            width: '100%', 
+            padding: '14px', 
+            marginBottom: '16px',
+            backgroundColor: 'transparent', 
+            color: '#10b981', 
+            borderRadius: '8px', 
+            fontSize: '14px', 
+            fontWeight: '600', 
+            border: '1px solid #10b981', 
+            cursor: 'pointer', 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            gap: '8px',
+            transition: 'all 0.2s'
+          }}
+          onMouseOver={(e) => { e.target.style.backgroundColor = 'rgba(16,185,129,0.1)' }}
+          onMouseOut={(e) => { e.target.style.backgroundColor = 'transparent' }}
+        >
+          <Play size={16} />
+          演示模式登录
+        </button>
+
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px' }}>
+          <div style={{ flex: 1, height: '1px', backgroundColor: '#27272a' }}></div>
+          <span style={{ padding: '0 12px', fontSize: '12px', color: '#71717a' }}>或</span>
+          <div style={{ flex: 1, height: '1px', backgroundColor: '#27272a' }}></div>
         </div>
 
         {/* 表单 */}
@@ -68,11 +126,13 @@ export default function Login() {
             </button>
           </div>
 
+
           {/* 错误 */}
           {error && (
             <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444', fontSize: '14px', marginBottom: '16px' }}>
               {error}
             </div>
+
           )}
 
 <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -88,8 +148,11 @@ export default function Login() {
                     style={{ width: '100%', padding: '10px 12px 10px 40px', backgroundColor: '#27272a', border: '1px solid #3f3f46', borderRadius: '8px', color: '#fff', fontSize: '14px', outline: 'none' }}
                   />
                 </div>
+
               </div>
+
             )}
+
 
             <div>
               <label style={{ display: 'block', fontSize: '12px', color: '#a1a1aa', marginBottom: '4px' }}>邮箱</label>
@@ -104,7 +167,9 @@ export default function Login() {
                   style={{ width: '100%', padding: '10px 12px 10px 40px', backgroundColor: '#27272a', border: '1px solid #3f3f46', borderRadius: '8px', color: '#fff', fontSize: '14px', outline: 'none' }}
                 />
               </div>
+
             </div>
+
 
             <div>
               <label style={{ display: 'block', fontSize: '12px', color: '#a1a1aa', marginBottom: '4px' }}>密码</label>
@@ -125,8 +190,10 @@ export default function Login() {
                 >
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
+
               </div>
             </div>
+
 
             <button 
               type="submit"
@@ -138,14 +205,20 @@ export default function Login() {
               ) : (
                 <>{isLogin ? '登录' : '注册'}<ArrowRight size={16} /></>
               )}
+
             </button>
+
           </form>
         </div>
+
 
         <p style={{ textAlign: 'center', fontSize: '12px', color: '#71717a', marginTop: '24px' }}>
           登录即同意 <span style={{ color: '#10b981' }}>服务条款</span> 和 <span style={{ color: '#10b981' }}>隐私政策</span>
         </p>
+
       </div>
+
     </div>
+
   )
 }
